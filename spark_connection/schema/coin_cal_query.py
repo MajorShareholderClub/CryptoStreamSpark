@@ -85,7 +85,7 @@ class SparkCoinAverageQueryOrganization:
         final_stream = reduce(DataFrame.union, dataframes)
 
         # Watermark 추가
-        watermarked_stream = final_stream.withWatermark("timestamp", "10 minutes")
+        watermarked_stream = final_stream.withWatermark("timestamp", "30 seconds")
         return watermarked_stream
 
     def cal_col(self):
@@ -94,7 +94,7 @@ class SparkCoinAverageQueryOrganization:
             .groupBy(
                 "market",
                 "coin_symbol",
-                F.window("timestamp", "1 minute"),  # 1분 단위로 윈도우 설정
+                F.window("timestamp", "3 minute"),  # 1분 단위로 윈도우 설정
             )
             .agg(
                 *agg_generator(self.fields),
