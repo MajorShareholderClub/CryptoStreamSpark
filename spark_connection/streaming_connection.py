@@ -13,6 +13,7 @@ from schema.abstruct_class import AbstructSparkSettingOrganization
 from schema.coin_cal_query import (
     SparkCoinAverageQueryOrganization as SparkStructCoin,
 )
+import yaml
 
 from config.properties import (
     KAFKA_BOOTSTRAP_SERVERS,
@@ -21,6 +22,12 @@ from config.properties import (
     COIN_MYSQL_USER,
     COIN_MYSQL_PASSWORD,
 )
+
+
+def load_config(config_path: str) -> dict[str, Any]:
+    """설정 파일 로드"""
+    with open(config_path, "r") as file:
+        return yaml.safe_load(file)
 
 
 class _ConcreteSparkSettingOrganization(AbstructSparkSettingOrganization):
@@ -211,7 +218,11 @@ class SparkStreamingCoinAverage(_ConcreteSparkSettingOrganization):
         """
         query = (
             SparkStructCoin(
-                self._stream_kafka_session(), self.market, self.partition, self.schema
+                self._stream_kafka_session(),
+                self.market,
+                self.partition,
+                load_config("config/kafka_s.yml"),
+                self.schema,
             )
             .cal_col()
             .writeStream.outputMode("update")

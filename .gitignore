@@ -162,3 +162,4 @@ cython_debug/
 #.idea/
 
 spark_connection/config/setting.conf
+spark_connection/config/kafka_s.yml
