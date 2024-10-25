@@ -2,7 +2,8 @@ from typing import Any
 from pyspark.sql import DataFrame, Column
 from pyspark.sql import functions as F
 from pyspark.sql.functions import col
-from functools import reduce
+import logging
+
 import logging
 
 logging.basicConfig(
@@ -11,47 +12,98 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def get_avg_field(markets: list[str], field: str) -> Column:
-    """각 거래소 별 평균"""
-    columns: list[Column] = [
-        F.col(f"crypto.{market}.data.{field}").cast("double") for market in markets
-    ]
-    avg_column = F.coalesce(F.avg(F.array(*columns)), F.lit(0))
-    return F.round(avg_column, 3).alias(field)
-
-
-def time_instructure(c) -> Column:
-    return F.to_timestamp(F.from_unixtime(c + 9 * 3600, "yyyy-MM-dd HH:mm:ss")).alias(
-        "timestamp"
+# 데이터 평탄화 함수 (실시간 스트리밍 지원)
+def flatten_exchange_data(df: DataFrame) -> DataFrame:
+    """각 거래소 데이터를 평탄화하여 변환"""
+    # 데이터 변환 및 평탄화
+    flattened_df = df.select(
+        "crypto.market",
+        "crypto.coin_symbol",
+        F.from_unixtime(col("crypto.timestamp") / 1000).alias("timestamp"),
+        F.explode("crypto.data").alias("data"),
+    ).select(
+        "market",
+        "coin_symbol",
+        "timestamp",
+        col("data.opening_price").cast("double").alias("opening_price"),
+        col("data.trade_price").cast("double").alias("trade_price"),
+        col("data.max_price").cast("double").alias("max_price"),
+        col("data.min_price").cast("double").alias("min_price"),
+        col("data.prev_closing_price").cast("double").alias("prev_closing_price"),
+        col("data.acc_trade_volume_24h").cast("double").alias("acc_trade_volume_24h"),
     )
+    return flattened_df
 
 
-def agg_generator(markets: list[str]) -> list[Column]:
-    """집계 함수 comprehension"""
-    return [F.format_number(F.avg(i), 2).alias(f"avg_{i}") for i in markets]
+# 통계 계산을 위한 함수
+def calculate_statistics(flattened_df: DataFrame) -> DataFrame:
+    """기본 통계 분석을 계산"""
+    stats_df = flattened_df.select(
+        "timestamp",
+        "trade_price",
+        "max_price",
+        "min_price",
+        "acc_trade_volume_24h",
+    ).agg(
+        F.round(F.avg("trade_price"), 2).alias("avg_price"),
+        F.round(F.stddev("trade_price"), 2).alias("price_volatility"),
+        F.round(F.max("max_price"), 2).alias("highest_price"),
+        F.round(F.min("min_price"), 2).alias("lowest_price"),
+        F.round(F.sum("acc_trade_volume_24h"), 2).alias("total_volume"),
+    )
+    return stats_df
 
 
-def process_exchange_data(df: DataFrame, exchange_name: str) -> DataFrame:
-    """각 거래소 데이터 처리"""
-    try:
-        return df.withColumn("market", F.lit(exchange_name)).select(
-            F.col(f"{exchange_name}.market").alias("market"),
-            time_instructure(F.col(f"{exchange_name}.timestamp")),
-            F.col(f"{exchange_name}.coin_symbol").alias("coin_symbol"),
-            F.col(f"{exchange_name}.data.opening_price").alias("opening_price"),
-            F.col(f"{exchange_name}.data.trade_price").alias("trade_price"),
-            F.col(f"{exchange_name}.data.max_price").alias("max_price"),
-            F.col(f"{exchange_name}.data.min_price").alias("min_price"),
-            F.col(f"{exchange_name}.data.prev_closing_price").alias(
-                "prev_closing_price"
-            ),
-            F.col(f"{exchange_name}.data.acc_trade_volume_24h").alias(
-                "acc_trade_volume_24h"
-            ),
-        )
-    except Exception as e:
-        logger.error(f"Error processing data for exchange {exchange_name}: {str(e)}")
-        return df.limit(0)  # 빈 DataFrame 반환
+# 변동성 지표 계산 함수
+def calculate_volatility(flattened_df: DataFrame) -> DataFrame:
+    """가격 변동성 지표 계산"""
+    volatility_df = flattened_df.select(
+        "timestamp",
+        F.round(
+            (col("max_price") - col("min_price")) / col("opening_price") * 100, 2
+        ).alias("price_range_percent"),
+        F.round(
+            (col("trade_price") - col("opening_price")) / col("opening_price") * 100, 2
+        ).alias("price_change_percent"),
+    )
+    return volatility_df
+
+
+def calculate_moving_average(flattened_df: DataFrame) -> DataFrame:
+    """시간 기반 이동 평균 계산 (6개 데이터 기준)"""
+    moving_averages_df = flattened_df.groupBy(F.window("timestamp", "10 minutes")).agg(
+        F.round(F.avg("trade_price"), 2).alias("MA6_price"),
+        F.round(F.avg("acc_trade_volume_24h"), 2).alias("MA6_volume"),
+    )
+    return moving_averages_df
+
+
+# VWAP 계산 함수
+def calculate_vwap(flattened_df: DataFrame) -> DataFrame:
+    """VWAP 계산 (시간 기반)"""
+    # 시간 기반의 슬라이딩 창을 생성 (예: 10분 간격)
+    vwap_df = flattened_df.groupBy(F.window("timestamp", "10 minutes")).agg(
+        F.round(
+            F.sum(col("trade_price") * col("acc_trade_volume_24h"))
+            / F.sum("acc_trade_volume_24h"),
+            2,
+        ).alias("VWAP")
+    )
+    return vwap_df
+
+
+# 가격 변동 패턴 분석 함수
+def analyze_price_patterns(flattened_df: DataFrame) -> DataFrame:
+    """가격 변동 패턴 분석"""
+    price_patterns_df = flattened_df.select(
+        "timestamp",
+        F.when(col("trade_price") > col("opening_price"), "상승")
+        .when(col("trade_price") < col("opening_price"), "하락")
+        .otherwise("보합")
+        .alias("price_pattern"),
+        F.round(col("trade_price") - col("opening_price"), 2).alias("price_change"),
+    )
+    return price_patterns_df
 
 
 class SparkCoinAverageQueryOrganization:
@@ -60,17 +112,15 @@ class SparkCoinAverageQueryOrganization:
     def __init__(
         self,
         kafka_data: DataFrame,
-        market: list[str],
         partition: int,
         config: dict,
-        schema: Any,  # schema
+        schema: Any,
     ) -> None:
         self.schema = schema
         self.kafka_cast_string = kafka_data.filter(
             col("partition") == partition
         ).selectExpr("CAST(key AS STRING)", "CAST(value AS STRING)")
         self.config = config
-        self.markets = market
         self.fields = config["fields"]
 
     def coin_main_columns(self) -> DataFrame:
@@ -78,38 +128,18 @@ class SparkCoinAverageQueryOrganization:
         data = self.kafka_cast_string.select(
             F.from_json("value", schema=self.schema).alias("crypto")
         )
-
-        # 데이터프레임을 생성
-        dataframes = [
-            process_exchange_data(data, f"crypto.{market}") for market in self.markets
-        ]
-        final_stream = reduce(DataFrame.union, dataframes)
-
-        # Watermark 추가
-        watermarked_stream = final_stream.withWatermark("timestamp", "30 seconds")
-        return watermarked_stream
+        data.printSchema()
+        flat_data = flatten_exchange_data(data)
+        return flat_data
 
     def cal_col(self):
-        price_grouped = (
-            self.coin_main_columns()
-            .groupBy(
-                "coin_symbol",
-                F.window("timestamp", "3 minute"),  # 1분 단위로 윈도우 설정
-            )
-            .agg(
-                *agg_generator(self.fields),
-                F.avg("acc_trade_volume_24h").alias("total_trade_volume"),
-            )
-        )
-        final_df = price_grouped.select(
-            col("coin_symbol").alias("name"),
-            F.struct(
-                col("avg_opening_price"),
-                col("avg_max_price"),
-                col("avg_min_price"),
-                col("avg_prev_closing_price"),
-                col("total_trade_volume"),
-            ).alias("data"),
-        )
+        # 데이터 변환 및 평탄화
+        data = self.coin_main_columns()
 
-        return final_df
+        stats_df = calculate_statistics(data)
+        volatility_df = calculate_volatility(data)
+        moving_averages_df = calculate_moving_average(data)
+        vwap_df = calculate_vwap(data)
+        price_patterns_df = analyze_price_patterns(data)
+
+        return vwap_df

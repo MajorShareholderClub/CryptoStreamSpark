@@ -23,6 +23,7 @@ from pyspark.sql.types import (
     StringType,
     LongType,
     DoubleType,
+    ArrayType,
 )
 
 
@@ -55,15 +56,17 @@ korea_schema = StructType(
     ]
 )
 
-foreign_schema = StructType(
+
+# 전체 마켓 데이터를 위한 스키마
+socket_market_schema = StructType(
     [
-        StructField("binance", market_schema, True),
-        StructField("kraken", market_schema, True),
-        StructField("okx", market_schema, True),
-        StructField("bybit", market_schema, True),
-        StructField("gateio", market_schema, True),
+        StructField("market", StringType(), False),
+        StructField("coin_symbol", StringType(), False),
+        StructField("timestamp", DoubleType(), False),
+        StructField("data", ArrayType(data_schema), False),
     ]
 )
+
 
 """
 # 평균값

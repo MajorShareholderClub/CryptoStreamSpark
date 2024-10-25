@@ -142,11 +142,10 @@ class SparkStreamingCoinAverage(_ConcreteSparkSettingOrganization):
                 - ex) "a,b,c,d"
             - startingOffsets: 최신순
         """
-
         return (
             self._spark.readStream.format("kafka")
             .option("kafka.bootstrap.servers", f"{KAFKA_BOOTSTRAP_SERVERS}")
-            .option("subscribe", self.topic)
+            .option("subscribe", f"{self.topic}")
             .option("startingOffsets", "earliest")
             .load()
         )
@@ -196,8 +195,6 @@ class SparkStreamingCoinAverage(_ConcreteSparkSettingOrganization):
     def saving_to_mysql_query(
         self, data_frame_type: DataFrame, connect: str
     ) -> DataFrame:
-        """데이터 처리 pythonUDF사용"""
-
         return data_frame_type.select(
             from_json("value", average_price_schema(connect)).alias("value")
         ).select(
@@ -219,7 +216,6 @@ class SparkStreamingCoinAverage(_ConcreteSparkSettingOrganization):
         query = (
             SparkStructCoin(
                 self._stream_kafka_session(),
-                self.market,
                 self.partition,
                 load_config("config/kafka_s.yml"),
                 self.schema,

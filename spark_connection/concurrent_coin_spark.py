@@ -10,7 +10,7 @@ from config.properties import (
     ETH_TOPIC_NAME,
     ETH_AVERAGE_TOPIC_NAME,
 )
-from schema.data_constructure import korea_schema, foreign_schema
+from schema.data_constructure import korea_schema, socket_market_schema, market_schema
 
 k_markets = ["upbit", "bithumb", "korbit", "coinone"]
 f_markets = ["binance", "kraken", "okx", "bybit", "gateio"]
@@ -28,7 +28,7 @@ def run_spark_streaming2(
     coin_name: str, topics: str, retrieve_topic: str, type_
 ) -> None:
     SparkStreamingCoinAverage(
-        coin_name, topics, retrieve_topic, type_, f_markets, 2, foreign_schema
+        coin_name, topics, retrieve_topic, type_, f_markets, 0, socket_market_schema
     ).run_spark_streaming()
 
 
@@ -54,5 +54,5 @@ def spark_in_start() -> None:
 
 
 if __name__ == "__main__":
-    spark_in_start()
-    # run_spark_streaming1("BTC", BTC_TOPIC_NAME, BTC_AVERAGE_TOPIC_NAME, "rest")
+    # spark_in_start()
+    run_spark_streaming2("BTC", BTC_TOPIC_NAME, BTC_AVERAGE_TOPIC_NAME, "rest")
