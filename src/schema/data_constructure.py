@@ -35,6 +35,8 @@ data_schema = StructType(
         StructField("min_price", StringType(), True),
         StructField("prev_closing_price", StringType(), True),
         StructField("acc_trade_volume_24h", StringType(), True),
+        StructField("signed_change_price", StringType(), True),
+        StructField("signed_change_rate", StringType(), True),
     ]
 )
 
@@ -60,10 +62,11 @@ korea_schema = StructType(
 # 전체 마켓 데이터를 위한 스키마
 socket_market_schema = StructType(
     [
-        StructField("market", StringType(), False),
-        StructField("coin_symbol", StringType(), False),
-        StructField("timestamp", DoubleType(), False),
-        StructField("data", ArrayType(data_schema), False),
+        StructField("region", StringType(), True),
+        StructField("market", StringType(), True),
+        StructField("coin_symbol", StringType(), True),
+        StructField("timestamp", DoubleType(), True),
+        StructField("data", ArrayType(data_schema), True),
     ]
 )
 
