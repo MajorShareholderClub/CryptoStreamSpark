@@ -11,6 +11,6 @@ class AbstructSparkSettingOrganization(ABC):
         pass
 
     @abstractmethod
-    def _topic_to_spark_streaming(self, data_format: DataFrame):
+    def _topic_to_kafka_sending(self, data_format: DataFrame):
         """Abstract method to convert topic to Spark streaming"""
         pass

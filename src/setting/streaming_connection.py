@@ -9,7 +9,8 @@ from pyspark.sql import SparkSession, DataFrame
 import yaml
 from src.schema.abstruct_class import AbstructSparkSettingOrganization
 from src.setting.coin_cal_query import (
-    SparkCoinAverageQueryOrganization as SparkStructCoin,
+    TickerQueryOrganization,
+    OrderbookQueryOrganization,
 )
 from src.config.properties import (
     KAFKA_BOOTSTRAP_SERVERS,
@@ -122,7 +123,6 @@ class SparkStreamingCoinAverage(_SparkSettingOrganization):
         """
         super().__init__(topic=topics)
         self._streaming_kafka_session: DataFrame = self._stream_kafka_session()
-        self._spark_struct = SparkStructCoin(self._streaming_kafka_session, schema)
         self.schema = schema
 
     def ticker_spark_streaming(self) -> None:
@@ -145,20 +145,19 @@ class SparkStreamingCoinAverage(_SparkSettingOrganization):
         #     .option("truncate", "false")
         #     .start()
         # )
-
+        ticker = TickerQueryOrganization(self._streaming_kafka_session, self.schema)
         # 시계열 지표 쿼리 및 카프카 전송
-        time_metrics_df = self._spark_struct.ticker_cal_time_based_metrics()
-
-        # 차익거래 쿼리 및 카프카 전송
-        arbitrage_df = self._spark_struct.ticker_cal_arbitrage()
-
         time_metrics_kafka = self._topic_to_kafka_sending(
-            data_format=time_metrics_df.selectExpr("to_json(struct(*)) AS value"),
+            data_format=ticker.cal_time_based_metrics().selectExpr(
+                "to_json(struct(*)) AS value"
+            ),
             retrieve_topic="TimeMetricsProcessedCoin",
         )
 
         arbitrage_kafka = self._topic_to_kafka_sending(
-            data_format=arbitrage_df.selectExpr("to_json(struct(*)) AS value"),
+            data_format=ticker.cal_arbitrage().selectExpr(
+                "to_json(struct(*)) AS value"
+            ),
             retrieve_topic="ArbitrageProcessedCoin",
         )
 
@@ -169,18 +168,22 @@ class SparkStreamingCoinAverage(_SparkSettingOrganization):
         """
         오더북 Spark Streaming 실행 함수 - 오더북 쿼리를 실행하고 카프카로 전송
         """
-        # 오더북 쿼리 및 카프카 전송
-        orderbook_df = self._spark_struct.orderbook_cal_region_stats()
-
+        orderbook = OrderbookQueryOrganization(
+            self._streaming_kafka_session, self.schema
+        )
         # 모든 지역 region orderbook 카프카 전송
         orderbook_cal_all_regions_kafka = self._topic_to_kafka_sending(
-            data_format=orderbook_df.selectExpr("to_json(struct(*)) AS value"),
+            data_format=orderbook.cal_all_regions_stats().selectExpr(
+                "to_json(struct(*)) AS value"
+            ),
             retrieve_topic="OrderbookProcessedAllRegionCoin",
         )
 
         # 각 지역 region orderbook 카프카 전송
         orderbook_cal_region_kafka = self._topic_to_kafka_sending(
-            data_format=orderbook_df.selectExpr("to_json(struct(*)) AS value"),
+            data_format=orderbook.cal_region_stats().selectExpr(
+                "to_json(struct(*)) AS value"
+            ),
             retrieve_topic="OrderbookProcessedRegionCoin",
         )
 

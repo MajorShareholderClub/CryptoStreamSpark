@@ -23,6 +23,7 @@ class SparkCoinAverageQueryOrganization:
         schema: Any,
     ) -> None:
         self.schema = schema
+
         self.kafka_cast_string = kafka_data.selectExpr(
             "CAST(key AS STRING)", "CAST(value AS STRING)"
         )

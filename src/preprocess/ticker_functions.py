@@ -1,24 +1,23 @@
 from pyspark.sql import DataFrame, Column
 from pyspark.sql import functions as F
 
-
+# fmt: off
 def unix_timestamp_to_timestamp(col_name: Column) -> Column:
     """unix timestamp를 timestamp로 변환"""
     return F.to_timestamp(F.from_unixtime(col_name / 1000)).alias("timestamp")
 
 
-# fmt: off
 def get_transformed_columns(target: str) -> list[Column]:
     """데이터 컬럼 변환 정의를 반환하는 함수"""
     return [
-        F.col(f"{target}.opening_price").cast("double").alias("opening_price"),
-        F.col(f"{target}.trade_price").cast("double").alias("trade_price"),
-        F.col(f"{target}.max_price").cast("double").alias("max_price"),
-        F.col(f"{target}.min_price").cast("double").alias("min_price"),
-        F.col(f"{target}.prev_closing_price").cast("double").alias("prev_closing_price"),
-        F.col(f"{target}.acc_trade_volume_24h").cast("double").alias("acc_trade_volume_24h"),
-        F.col(f"{target}.signed_change_price").cast("double").alias("signed_change_price"),
-        F.col(f"{target}.signed_change_rate").cast("double").alias("signed_change_rate")
+        F.coalesce(F.col(f"{target}.opening_price").cast("double"), F.lit(0.0)).alias("opening_price"),
+        F.coalesce(F.col(f"{target}.trade_price").cast("double"), F.lit(0.0)).alias("trade_price"),
+        F.coalesce(F.col(f"{target}.max_price").cast("double"), F.lit(0.0)).alias("max_price"),
+        F.coalesce(F.col(f"{target}.min_price").cast("double"), F.lit(0.0)).alias("min_price"),
+        F.coalesce(F.col(f"{target}.prev_closing_price").cast("double"), F.lit(0.0)).alias("prev_closing_price"),
+        F.coalesce(F.col(f"{target}.acc_trade_volume_24h").cast("double"), F.lit(0.0)).alias("acc_trade_volume_24h"),
+        F.coalesce(F.col(f"{target}.signed_change_price").cast("double"), F.lit(0.0)).alias("signed_change_price"),
+        F.coalesce(F.col(f"{target}.signed_change_rate").cast("double"), F.lit(0.0)).alias("signed_change_rate")
     ]
 
 
@@ -47,15 +46,8 @@ def calculate_time_based_metrics(
 ) -> DataFrame:
     """시간 기반 메트릭 계산 (통계 및 이동 평균)"""
     return (
-        flattened_df.select(
-            "region",
-            "coin_symbol",
-            "timestamp",
-            "trade_price",
-            "max_price",
-            "min_price",
-            "acc_trade_volume_24h",
-        )
+        flattened_df
+        .withWatermark("timestamp", "2 minutes")  # watermark 적용
         .groupBy(
             F.window("timestamp", window_duration, sliding_duration),
             F.col("coin_symbol"),
@@ -86,14 +78,12 @@ def calculate_time_based_metrics(
     )
 
 
-# fmt: off
 def calculate_arbitrage(df: DataFrame) -> DataFrame:
     """지역 간 거래 차익 계산"""
     
-        
     def avg_region_price(region: str) -> Column:
         """거래소 매핑 함수"""
-        return F.avg(F.when(F.col("region") == region, F.col("trade_price")))
+        return F.avg(F.when(F.col("region") == region, F.col("trade_price")).otherwise(F.lit(0.0)))
 
     def region_spread_price(first_region: str, second_region: str) -> Column:
         """지역 가격 차익 계산 함수"""
@@ -112,10 +102,10 @@ def calculate_arbitrage(df: DataFrame) -> DataFrame:
             (first_region_price - second_region_price) / second_region_price * 100,
             2,
         )
-        
-    
+
     return (
-        df.groupBy(F.window("timestamp", "5 minute", "1 minute"), "coin_symbol")
+        df.withWatermark("timestamp", "3 minutes")  # watermark 적용
+        .groupBy(F.window("timestamp", "5 minutes", "1 minute"), "coin_symbol")
         .agg(
             avg_region_price("korea").alias("kr_price"),
             avg_region_price("asia").alias("asia_price"),
@@ -131,14 +121,11 @@ def calculate_arbitrage(df: DataFrame) -> DataFrame:
             region_spread_price("kr", "global").alias("kr_global_spread"),
             region_spread_price("kr", "asia").alias("kr_asia_spread"),
             region_spread_price("global", "asia").alias("global_asia_spread"),
-            
             region_spread("kr", "global").alias("kr_global_spread_percent"),
             region_spread("kr", "asia").alias("kr_asia_spread_percent"),
             region_spread("global", "asia").alias("global_asia_spread_percent"),
-
         )
     )
-
 
 # def calculate_vwap(flattened_df: DataFrame) -> DataFrame:
 #     """VWAP 계산 (시간 기반)"""
