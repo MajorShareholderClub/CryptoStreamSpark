@@ -5,19 +5,20 @@ Spark streaming coin average price
 from __future__ import annotations
 from typing import Any
 from pyspark.sql import SparkSession, DataFrame
-
+from pyspark.sql.types import StructType
+from pyspark.sql import functions as F
+from src.schema.preprocess_schema import (
+    time_metrics_schema,
+    arbitrage_schema,
+    orderbook_cal_schema,
+    orderbook_cal_all_schema,
+)
+from src.config.properties import KAFKA_BOOTSTRAP_SERVERS, SPARK_PACKAGE
 from src.schema.abstruct_class import AbstructSparkSettingOrganization
 from src.storage.mysql_sink import write_to_mysql
 from src.setting.coin_cal_query import (
     TickerQueryOrganization,
     OrderbookQueryOrganization,
-)
-from src.config.properties import (
-    KAFKA_BOOTSTRAP_SERVERS,
-    SPARK_PACKAGE,
-    COIN_MYSQL_URL,
-    COIN_MYSQL_USER,
-    COIN_MYSQL_PASSWORD,
 )
 
 
@@ -129,13 +130,25 @@ class SparkStreamingCoinAverage(_SparkSettingOrganization):
     def _process_select_expr(self, process: DataFrame) -> DataFrame:
         return process.selectExpr(self.to_json_struct)
 
-    def _write_to_mysql(self, data_format: DataFrame, table_name: str):
-        return write_to_mysql(data_format, table_name)
+    def _write_to_mysql(self, data: DataFrame, table_name: str, schema: StructType):
+        def saving_to_mysql_query(data: DataFrame, schema: StructType) -> DataFrame:
+            return data.select(
+                F.from_json("value", schema=schema).alias("data")
+            ).select("data.*")
 
-    def _process_and_send(self, data: DataFrame, topic: str, table_name: str) -> tuple:
+        p_data: DataFrame = saving_to_mysql_query(data, schema)
+        return write_to_mysql(p_data, table_name)
+
+    def _process_and_send(
+        self,
+        data: DataFrame,
+        topic: str,
+        table_name: str,
+        schema: StructType,
+    ) -> tuple:
         """데이터 처리 및 전송을 위한 헬퍼 메서드"""
         processed_data = self._process_select_expr(data)
-        mysql_sink = self._write_to_mysql(processed_data, table_name)
+        mysql_sink = self._write_to_mysql(processed_data, table_name, schema)
         kafka_sink = self._topic_to_kafka_sending(processed_data, topic)
         return mysql_sink, kafka_sink
 
@@ -153,6 +166,7 @@ class SparkStreamingCoinAverage(_SparkSettingOrganization):
             ticker.cal_time_based_metrics(),
             "TimeMetricsProcessedCoin",
             "time_metrics",
+            time_metrics_schema,
         )
 
         # 차익 계산 처리
@@ -160,6 +174,7 @@ class SparkStreamingCoinAverage(_SparkSettingOrganization):
             ticker.cal_arbitrage(),
             "ArbitrageProcessedCoin",
             "arbitrage",
+            arbitrage_schema,
         )
 
         self._await_all(
@@ -177,6 +192,7 @@ class SparkStreamingCoinAverage(_SparkSettingOrganization):
             orderbook.cal_all_regions_stats(),
             "OrderbookProcessedAllRegionCoin",
             "order_cal_all",
+            orderbook_cal_all_schema,
         )
 
         # 개별 지역 통계 처리
@@ -184,6 +200,7 @@ class SparkStreamingCoinAverage(_SparkSettingOrganization):
             orderbook.cal_region_stats(),
             "OrderbookProcessedRegionCoin",
             "order_cal_region",
+            orderbook_cal_schema,
         )
 
         self._await_all(

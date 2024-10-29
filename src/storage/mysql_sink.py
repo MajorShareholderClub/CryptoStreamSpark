@@ -1,8 +1,8 @@
 from pyspark.sql import DataFrame
-from config.properties import COIN_MYSQL_URL, COIN_MYSQL_USER, COIN_MYSQL_PASSWORD
+from src.config.properties import COIN_MYSQL_URL, COIN_MYSQL_USER, COIN_MYSQL_PASSWORD
 
 
-def write_to_mysql(data_format: DataFrame, table_name: str):
+def write_to_mysql(data: DataFrame, table_name: str):
     """
     Function Args:
         - data_format (DataFrame): 저장할 데이터 포맷
@@ -35,9 +35,9 @@ def write_to_mysql(data_format: DataFrame, table_name: str):
         )
 
     return (
-        data_format.writeStream.outputMode("update")
+        data.writeStream.outputMode("update")
         .foreachBatch(_write_batch_to_mysql)
-        .option("checkpointLocation", checkpoint_dir)
+        .option("checkpointLocation", f"checkpoint/mysql_checkpoint/{checkpoint_dir}")
         .trigger(processingTime="1 minute")
         .start()
     )

@@ -36,7 +36,7 @@ def calculate_region_stats(df: DataFrame) -> DataFrame:
     """각 region별 통계 계산 (1분 윈도우)"""
 
     return (
-        df.groupBy("region", F.window("timestamp", "1 minute"))
+        df.groupBy("region", F.window("timestamp", "1 minute"), "symbol")
         .agg(
             bid_ask_avg("highest_bid").alias("avg_highest_bid"),
             bid_ask_avg("lowest_ask").alias("avg_lowest_ask"),
@@ -46,6 +46,7 @@ def calculate_region_stats(df: DataFrame) -> DataFrame:
         )
         .select(
             "region",
+            "symbol",
             "window.start",
             "window.end",
             "avg_highest_bid",
@@ -61,7 +62,7 @@ def calculate_region_stats(df: DataFrame) -> DataFrame:
 def calculate_all_regions_stats(df: DataFrame) -> DataFrame:
     """모든 region의 통합 통계 계산 (1분 윈도우)"""
     return (
-        df.groupBy(F.window("timestamp", "1 minute"))
+        df.groupBy(F.window("timestamp", "1 minute"), "symbol")
         .agg(
             bid_ask_avg("highest_bid").alias("avg_highest_bid"),
             bid_ask_avg("lowest_ask").alias("avg_lowest_ask"), 
@@ -70,7 +71,8 @@ def calculate_all_regions_stats(df: DataFrame) -> DataFrame:
             F.count("*").alias("record_count"),
         )
         .select(
-            F.lit("Total"),
+            F.lit("Total").alias("region"),
+            "symbol",
             "window.start",
             "window.end",
             "avg_highest_bid",
