@@ -22,7 +22,7 @@ def get_transformed_columns(target: str) -> list[Column]:
     ]
 
 
-def flatten_exchange_data(df: DataFrame) -> DataFrame:
+def ticker_flatten_exchange_data(df: DataFrame) -> DataFrame:
     """각 거래소 데이터를 평탄화하여 변환"""
     flattened_df = df.select(
         "crypto.region",

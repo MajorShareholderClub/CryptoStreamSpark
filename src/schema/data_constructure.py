@@ -24,10 +24,24 @@ from pyspark.sql.types import (
     LongType,
     DoubleType,
     ArrayType,
+    FloatType,
+    TimestampType,
 )
 
+orderbook_data_schema = StructType(
+    [
+        StructField("region", StringType(), True),
+        StructField("market", StringType(), True),
+        StructField("symbol", StringType(), True),
+        StructField("highest_bid", FloatType(), True),
+        StructField("lowest_ask", FloatType(), True),
+        StructField("total_bid_volume", FloatType(), True),
+        StructField("total_ask_volume", FloatType(), True),
+        StructField("timestamp", TimestampType(), True),
+    ]
+)
 
-data_schema = StructType(
+tickker_data_schema = StructType(
     [
         StructField("opening_price", StringType(), True),
         StructField("trade_price", StringType(), True),
@@ -45,7 +59,7 @@ market_schema = StructType(
         StructField("market", StringType(), True),
         StructField("timestamp", DoubleType(), True),
         StructField("coin_symbol", StringType(), True),
-        StructField("data", data_schema),
+        StructField("data", tickker_data_schema),
     ]
 )
 
@@ -66,7 +80,7 @@ socket_market_schema = StructType(
         StructField("market", StringType(), True),
         StructField("coin_symbol", StringType(), True),
         StructField("timestamp", DoubleType(), True),
-        StructField("data", ArrayType(data_schema), True),
+        StructField("data", ArrayType(tickker_data_schema), True),
     ]
 )
 
@@ -90,19 +104,7 @@ average_schema = StructType(
         [
             StructField("name", StringType()),
             StructField("time", LongType()),
-            StructField("data", data_schema),
+            StructField("data", tickker_data_schema),
         ]
     ),
 )
-
-
-def average_price_schema(type_: str) -> StructType:
-
-    return StructType(
-        [
-            StructField(
-                type_,
-                StructType(average_schema),
-            )
-        ]
-    )

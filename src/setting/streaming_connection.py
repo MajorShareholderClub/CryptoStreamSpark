@@ -5,7 +5,6 @@ Spark streaming coin average price
 from __future__ import annotations
 from typing import Any
 from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql.streaming import StreamingQuery
 
 import yaml
 from src.schema.abstruct_class import AbstructSparkSettingOrganization
@@ -21,21 +20,11 @@ from src.config.properties import (
 )
 
 
-def load_config(config_path: str) -> dict[str, Any]:
-    """설정 파일 로드"""
-    with open(config_path, "r") as file:
-        return yaml.safe_load(file)
-
-
-class _ConcreteSparkSettingOrganization(AbstructSparkSettingOrganization):
+class _SparkSettingOrganization(AbstructSparkSettingOrganization):
     """SparkSession Setting 모음"""
 
-    def __init__(self, name: str) -> None:
-        """생성자
-        Args:
-            topics (str): 토픽
-        """
-        self.name = name
+    def __init__(self, topic: str) -> None:
+        self.topic = topic
         self._spark: SparkSession = self._create_spark_session()
 
     def _create_spark_session(self) -> SparkSession:
@@ -75,7 +64,23 @@ class _ConcreteSparkSettingOrganization(AbstructSparkSettingOrganization):
         spark.sparkContext.setLogLevel("ERROR")
         return spark
 
-    def _topic_to_spark_streaming(self, data_format: DataFrame, retrieve_topic: str):
+    def _stream_kafka_session(self) -> DataFrame:
+        """
+        Kafka Bootstrap Setting Args:
+            - kafka.bootstrap.servers : Broker 설정
+            - subscribe : 가져올 토픽 (,기준)
+                - ex) "a,b,c,d"
+            - startingOffsets: 최신순
+        """
+        return (
+            self._spark.readStream.format("kafka")
+            .option("kafka.bootstrap.servers", f"{KAFKA_BOOTSTRAP_SERVERS}")
+            .option("subscribe", f"{self.topic}")
+            .option("startingOffsets", "earliest")
+            .load()
+        )
+
+    def _topic_to_kafka_sending(self, data_format: DataFrame, retrieve_topic: str):
         """
         Kafka Bootstrap Setting Args:
             - kafka.bootstrap.servers : Broker 설정
@@ -104,55 +109,27 @@ class _ConcreteSparkSettingOrganization(AbstructSparkSettingOrganization):
         )
 
 
-class SparkStreamingCoinAverage(_ConcreteSparkSettingOrganization):
+class SparkStreamingCoinAverage(_SparkSettingOrganization):
     """
     데이터 처리 클래스
     """
 
-    def __init__(self, name: str, topics: str, schema: Any) -> None:
+    def __init__(self, topics: str, schema: Any) -> None:
         """
         Args:
-            coin_name (str): 코인 이름
             topics (str): 토픽
             retrieve_topic (str): 처리 후 다시 카프카로 보낼 토픽
         """
-        super().__init__(name)
-        self.topic = topics
+        super().__init__(topic=topics)
         self._streaming_kafka_session: DataFrame = self._stream_kafka_session()
+        self._spark_struct = SparkStructCoin(self._streaming_kafka_session, schema)
         self.schema = schema
 
-    def _stream_kafka_session(self) -> DataFrame:
-        """
-        Kafka Bootstrap Setting Args:
-            - kafka.bootstrap.servers : Broker 설정
-            - subscribe : 가져올 토픽 (,기준)
-                - ex) "a,b,c,d"
-            - startingOffsets: 최신순
-        """
-        return (
-            self._spark.readStream.format("kafka")
-            .option("kafka.bootstrap.servers", f"{KAFKA_BOOTSTRAP_SERVERS}")
-            .option("subscribe", f"{self.topic}")
-            .option("startingOffsets", "earliest")
-            .load()
-        )
-
-    def run_spark_streaming(self) -> None:
+    def ticker_spark_streaming(self) -> None:
         """
         Spark Streaming 실행 함수 - 여러 쿼리를 동시에 실행하고 관리하고 카프카로 전송
         """
         # 공통 설정
-        spark_struct = SparkStructCoin(
-            self._stream_kafka_session(),
-            load_config("src/config/kafka_s.yml"),
-            self.schema,
-        )
-
-        # 시계열 지표 쿼리 및 카프카 전송
-        time_metrics_df = spark_struct.cal_time_based_metrics()
-
-        # 차익거래 쿼리 및 카프카 전송
-        arbitrage_df = spark_struct.cal_arbitrage()
 
         # # debug 용
         # time_metrics_console = (
@@ -169,15 +146,43 @@ class SparkStreamingCoinAverage(_ConcreteSparkSettingOrganization):
         #     .start()
         # )
 
-        time_metrics_kafka = self._topic_to_spark_streaming(
+        # 시계열 지표 쿼리 및 카프카 전송
+        time_metrics_df = self._spark_struct.ticker_cal_time_based_metrics()
+
+        # 차익거래 쿼리 및 카프카 전송
+        arbitrage_df = self._spark_struct.ticker_cal_arbitrage()
+
+        time_metrics_kafka = self._topic_to_kafka_sending(
             data_format=time_metrics_df.selectExpr("to_json(struct(*)) AS value"),
             retrieve_topic="TimeMetricsProcessedCoin",
         )
 
-        arbitrage_kafka = self._topic_to_spark_streaming(
+        arbitrage_kafka = self._topic_to_kafka_sending(
             data_format=arbitrage_df.selectExpr("to_json(struct(*)) AS value"),
             retrieve_topic="ArbitrageProcessedCoin",
         )
 
         time_metrics_kafka.awaitTermination()
         arbitrage_kafka.awaitTermination()
+
+    def orderbook_spark_streaming(self) -> None:
+        """
+        오더북 Spark Streaming 실행 함수 - 오더북 쿼리를 실행하고 카프카로 전송
+        """
+        # 오더북 쿼리 및 카프카 전송
+        orderbook_df = self._spark_struct.orderbook_cal_region_stats()
+
+        # 모든 지역 region orderbook 카프카 전송
+        orderbook_cal_all_regions_kafka = self._topic_to_kafka_sending(
+            data_format=orderbook_df.selectExpr("to_json(struct(*)) AS value"),
+            retrieve_topic="OrderbookProcessedAllRegionCoin",
+        )
+
+        # 각 지역 region orderbook 카프카 전송
+        orderbook_cal_region_kafka = self._topic_to_kafka_sending(
+            data_format=orderbook_df.selectExpr("to_json(struct(*)) AS value"),
+            retrieve_topic="OrderbookProcessedRegionCoin",
+        )
+
+        orderbook_cal_all_regions_kafka.awaitTermination()
+        orderbook_cal_region_kafka.awaitTermination()
