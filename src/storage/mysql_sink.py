@@ -2,7 +2,7 @@ from pyspark.sql import DataFrame
 from config.properties import COIN_MYSQL_URL, COIN_MYSQL_USER, COIN_MYSQL_PASSWORD
 
 
-def _coin_write_to_mysql(self, data_format: DataFrame, table_name: str):
+def write_to_mysql(data_format: DataFrame, table_name: str):
     """
     Function Args:
         - data_format (DataFrame): 저장할 데이터 포맷

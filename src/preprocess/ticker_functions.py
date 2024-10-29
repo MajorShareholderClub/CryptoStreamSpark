@@ -83,8 +83,8 @@ def calculate_arbitrage(df: DataFrame) -> DataFrame:
     
     def avg_region_price(region: str) -> Column:
         """거래소 매핑 함수"""
-        return F.avg(F.when(F.col("region") == region, F.col("trade_price")).otherwise(F.lit(0.0)))
-
+        return F.avg(F.when(F.col("region") == region, F.col("trade_price")))
+    
     def region_spread_price(first_region: str, second_region: str) -> Column:
         """지역 가격 차익 계산 함수"""
         first_region_price = F.col(f"{first_region}_price")
@@ -102,6 +102,7 @@ def calculate_arbitrage(df: DataFrame) -> DataFrame:
             (first_region_price - second_region_price) / second_region_price * 100,
             2,
         )
+        
 
     return (
         df.withWatermark("timestamp", "3 minutes")  # watermark 적용

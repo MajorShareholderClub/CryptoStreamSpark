@@ -6,8 +6,8 @@ from __future__ import annotations
 from typing import Any
 from pyspark.sql import SparkSession, DataFrame
 
-import yaml
 from src.schema.abstruct_class import AbstructSparkSettingOrganization
+from src.storage.mysql_sink import write_to_mysql
 from src.setting.coin_cal_query import (
     TickerQueryOrganization,
     OrderbookQueryOrganization,
@@ -122,70 +122,73 @@ class SparkStreamingCoinAverage(_SparkSettingOrganization):
             retrieve_topic (str): 처리 후 다시 카프카로 보낼 토픽
         """
         super().__init__(topic=topics)
-        self._streaming_kafka_session: DataFrame = self._stream_kafka_session()
+        self._streaming_kafka_session = self._stream_kafka_session()
         self.schema = schema
+        self.to_json_struct = "to_json(struct(*)) AS value"
+
+    def _process_select_expr(self, process: DataFrame) -> DataFrame:
+        return process.selectExpr(self.to_json_struct)
+
+    def _write_to_mysql(self, data_format: DataFrame, table_name: str):
+        return write_to_mysql(data_format, table_name)
+
+    def _process_and_send(self, data: DataFrame, topic: str, table_name: str) -> tuple:
+        """데이터 처리 및 전송을 위한 헬퍼 메서드"""
+        processed_data = self._process_select_expr(data)
+        mysql_sink = self._write_to_mysql(processed_data, table_name)
+        kafka_sink = self._topic_to_kafka_sending(processed_data, topic)
+        return mysql_sink, kafka_sink
+
+    def _await_all(self, *sinks) -> None:
+        """모든 싱크의 종료를 기다림"""
+        for sink in sinks:
+            sink.awaitTermination()
 
     def ticker_spark_streaming(self) -> None:
-        """
-        Spark Streaming 실행 함수 - 여러 쿼리를 동시에 실행하고 관리하고 카프카로 전송
-        """
-        # 공통 설정
-
-        # # debug 용
-        # time_metrics_console = (
-        #     spark_struct.cal_time_based_metrics()
-        #     .writeStream.outputMode("update")
-        #     .format("console")
-        #     .option("truncate", "false")
-        #     .start()
-        # )
-        # arbitrage_console = (
-        #     arbitrage_df.writeStream.outputMode("update")
-        #     .format("console")
-        #     .option("truncate", "false")
-        #     .start()
-        # )
+        """시계열 지표와 차익 계산 스트리밍"""
         ticker = TickerQueryOrganization(self._streaming_kafka_session, self.schema)
-        # 시계열 지표 쿼리 및 카프카 전송
-        time_metrics_kafka = self._topic_to_kafka_sending(
-            data_format=ticker.cal_time_based_metrics().selectExpr(
-                "to_json(struct(*)) AS value"
-            ),
-            retrieve_topic="TimeMetricsProcessedCoin",
+
+        # 시계열 지표 처리
+        time_metrics_mysql, time_metrics_kafka = self._process_and_send(
+            ticker.cal_time_based_metrics(),
+            "TimeMetricsProcessedCoin",
+            "time_metrics",
         )
 
-        arbitrage_kafka = self._topic_to_kafka_sending(
-            data_format=ticker.cal_arbitrage().selectExpr(
-                "to_json(struct(*)) AS value"
-            ),
-            retrieve_topic="ArbitrageProcessedCoin",
+        # 차익 계산 처리
+        arbitrage_mysql, arbitrage_kafka = self._process_and_send(
+            ticker.cal_arbitrage(),
+            "ArbitrageProcessedCoin",
+            "arbitrage",
         )
 
-        time_metrics_kafka.awaitTermination()
-        arbitrage_kafka.awaitTermination()
+        self._await_all(
+            time_metrics_mysql, time_metrics_kafka, arbitrage_mysql, arbitrage_kafka
+        )
 
     def orderbook_spark_streaming(self) -> None:
-        """
-        오더북 Spark Streaming 실행 함수 - 오더북 쿼리를 실행하고 카프카로 전송
-        """
+        """오더북 데이터 스트리밍"""
         orderbook = OrderbookQueryOrganization(
             self._streaming_kafka_session, self.schema
         )
-        # 모든 지역 region orderbook 카프카 전송
-        orderbook_cal_all_regions_kafka = self._topic_to_kafka_sending(
-            data_format=orderbook.cal_all_regions_stats().selectExpr(
-                "to_json(struct(*)) AS value"
-            ),
-            retrieve_topic="OrderbookProcessedAllRegionCoin",
+
+        # 전체 지역 통계 처리
+        all_regions_mysql, all_regions_kafka = self._process_and_send(
+            orderbook.cal_all_regions_stats(),
+            "OrderbookProcessedAllRegionCoin",
+            "order_cal_all",
         )
 
-        # 각 지역 region orderbook 카프카 전송
-        orderbook_cal_region_kafka = self._topic_to_kafka_sending(
-            data_format=orderbook.cal_region_stats().selectExpr(
-                "to_json(struct(*)) AS value"
-            ),
-            retrieve_topic="OrderbookProcessedRegionCoin",
+        # 개별 지역 통계 처리
+        region_mysql, region_kafka = self._process_and_send(
+            orderbook.cal_region_stats(),
+            "OrderbookProcessedRegionCoin",
+            "order_cal_region",
         )
 
-        orderbook_cal_all_regions_kafka.awaitTermination()
-        orderbook_cal_region_kafka.awaitTermination()
+        self._await_all(
+            all_regions_mysql,
+            all_regions_kafka,
+            region_mysql,
+            region_kafka,
+        )
