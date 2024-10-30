@@ -2,7 +2,11 @@
 
 ## 1. 소개
 
-- 코인 데이터를 카프카에서 받아서 스파크에서 실시간으로 처리하는 프로젝트 입니다 
+- 코인 데이터를 카프카에서 받아서 스파크에서 실시간으로 처리하는 프로젝트 입니다
+
+## 시스템 아키텍처 
+<img width="500" alt="image" src="https://github.com/user-attachments/assets/1c08c6dd-8b5c-4754-b75d-4bf48f579e87">
+
 
 ## 2. 프로세스 
 ```mermaid
