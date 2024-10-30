@@ -47,15 +47,13 @@ class _SparkSettingOrganization(AbstructSparkSettingOrganization):
             .master("local[*]")
             .config("spark.jars.packages", f"{SPARK_PACKAGE}")
             # .config('spark.hadoop.fs.s3a.aws.credentials.provider', 'org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider')
-            # .config("spark.kafka.consumer.cache.capacity", "")
+            .config("spark.kafka.consumer.cache.capacity", "150")
             .config("spark.streaming.stopGracefullyOnShutdown", "true")
             .config("spark.streaming.backpressure.enabled", "true")
             .config(
                 "spark.streaming.kafka.consumer.config.auto.offset.reset", "earliest"
             )
-            .config(
-                "spark.sql.streaming.statefulOperator.checkCorrectness.enabled", "false"
-            )
+            # .config("spark.sql.streaming.statefulOperator.checkCorrectness.enabled", "false")
             .config("spark.sql.session.timeZone", "Asia/Seoul")
             .config("spark.sql.adaptive.enabled", "false")
             .config("spark.executor.memory", "8g")
