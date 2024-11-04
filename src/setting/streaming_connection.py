@@ -245,12 +245,12 @@ class SparkStreamingTicker(SparkStreamingCoinAverage):
         )
 
         self._await_all(
-            # time_metrics_mysql,
-            # time_metrics_kafka,
-            # arbitrage_mysql,
-            # arbitrage_kafka,
-            # market_arbitrage_mysql,
-            # market_arbitrage_kafka,
+            time_metrics_mysql,
+            time_metrics_kafka,
+            arbitrage_mysql,
+            arbitrage_kafka,
+            market_arbitrage_mysql,
+            market_arbitrage_kafka,
             market_arbitrage_signal_mysql,
             market_arbitrage_signal_kafka,
         )

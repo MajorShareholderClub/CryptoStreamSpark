@@ -17,7 +17,7 @@ classDiagram
         +_topic_to_kafka_sending(data_format)*
     }
 
-    class SparkSettingOrganization {
+    class _SparkSettingOrganization {
         -topic: str
         -_spark: SparkSession
         +_create_spark_session()
@@ -28,12 +28,20 @@ classDiagram
     class SparkStreamingCoinAverage {
         -schema: Any
         -to_json_struct: str
-        +ticker_spark_streaming()
-        +orderbook_spark_streaming()
         +_process_select_expr()
         +_write_to_mysql()
         +_process_and_send()
         +_await_all()
+    }
+
+    class SparkStreamingTicker {
+        +ticker_spark_streaming()
+        +debug_ticker_streaming()
+    }
+
+    class SparkStreamingOrderbook {
+        +orderbook_spark_streaming()
+        +debug_orderbook_streaming()
     }
 
     class SparkCoinAverageQueryOrganization {
@@ -55,8 +63,10 @@ classDiagram
         +cal_all_regions_stats()
     }
 
-    AbstructSparkSettingOrganization <|-- SparkSettingOrganization
-    SparkSettingOrganization <|-- SparkStreamingCoinAverage
+    AbstructSparkSettingOrganization <|-- _SparkSettingOrganization
+    _SparkSettingOrganization <|-- SparkStreamingCoinAverage
+    SparkStreamingCoinAverage <|-- SparkStreamingTicker
+    SparkStreamingCoinAverage <|-- SparkStreamingOrderbook
     SparkCoinAverageQueryOrganization <|-- TickerQueryOrganization
     SparkCoinAverageQueryOrganization <|-- OrderbookQueryOrganization
 ```
