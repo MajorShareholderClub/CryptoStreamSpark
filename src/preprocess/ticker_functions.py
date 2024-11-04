@@ -128,28 +128,136 @@ def calculate_arbitrage(df: DataFrame) -> DataFrame:
         )
     )
 
-# def calculate_vwap(flattened_df: DataFrame) -> DataFrame:
-#     """VWAP 계산 (시간 기반)"""
-#     vwap_df = flattened_df.groupBy(F.window("timestamp", "10 minutes")).agg(
-#         F.round(
-#             F.sum(F.col("trade_price") * F.col("acc_trade_volume_24h"))
-#             / F.sum("acc_trade_volume_24h"),
-#             2,
-#         ).alias("VWAP")
-#     )
-#     return vwap_df
 
 
-# def detect_outliers(stats_df: DataFrame) -> DataFrame:
-#     """이상치 탐지"""
-#     # 평균과 표준편차 계산
-#     avg_volatility = stats_df.agg(F.avg("price_volatility")).first()
-#     stddev_volatility = stats_df.agg(F.stddev("price_volatility")).first()
+def calculate_market_arbitrage(df: DataFrame) -> DataFrame:
+    """거래소별 차익 계산"""
+    
+    def avg_market_price(market: str) -> Column:
+        """거래소 평균 가격 계산 함수"""
+        return F.avg(F.when(F.col("market") == market, F.col("trade_price")))
+    
+    def market_spread(first_market: str, second_market: str) -> Column:
+        """거래소간 가격 차이 계산 함수"""
+        first_price = F.col(f"{first_market}_price")
+        second_price = F.col(f"{second_market}_price")
+        return F.round(
+            (first_price - second_price) / second_price * 100,
+            2,
+        )
 
-#     # 이상치 기준 설정 (예: 평균 + 2 * 표준편차)
-#     threshold = avg_volatility + 2 * stddev_volatility
+    return (
+        df.withWatermark("timestamp", "3 minutes")
+        .groupBy(F.window("timestamp", "5 minutes", "1 minute"), "coin_symbol")
+        .agg(
+            # 한국 거래소
+            avg_market_price("UPBIT").alias("UPBIT_price"),
+            avg_market_price("BITHUMB").alias("BITHUMB_price"),
+            avg_market_price("KORBIT").alias("KORBIT_price"),
+            avg_market_price("COINONE").alias("COINONE_price"),
+            # 아시아 거래소
+            avg_market_price("BYBIT").alias("BYBIT_price"),
+            avg_market_price("GATEIO").alias("GATEIO_price"),
+            avg_market_price("OKX").alias("OKX_price"),
+            # 글로벌 거래소
+            avg_market_price("BINANCE").alias("BINANCE_price"),
+            avg_market_price("KRAKEN").alias("KRAKEN_price"),
+        )
+        .select(
+            "coin_symbol",
+            "window.start",
+            "window.end",
+            # 기본 가격 정보
+            "UPBIT_price", "BITHUMB_price", "KORBIT_price", "COINONE_price",
+            "BYBIT_price", "GATEIO_price", "OKX_price",
+            "BINANCE_price", "KRAKEN_price",
+            # 한국 거래소간 차이
+            market_spread("UPBIT", "BITHUMB").alias("UPBIT_BITHUMB_spread"),
+            market_spread("UPBIT", "KORBIT").alias("UPBIT_KORBIT_spread"),
+            market_spread("UPBIT", "COINONE").alias("UPBIT_COINONE_spread"),
+            # 아시아 거래소간 차이
+            market_spread("BYBIT", "GATEIO").alias("BYBIT_GATEIO_spread"),
+            market_spread("BYBIT", "OKX").alias("BYBIT_OKX_spread"),
+            # 글로벌 거래소간 차이
+            market_spread("BINANCE", "KRAKEN").alias("BINANCE_KRAKEN_spread"),
+            # 대표 거래소간 차이 (UPBIT vs BINANCE vs BYBIT)
+            market_spread("UPBIT", "BINANCE").alias("UPBIT_BINANCE_spread"),
+            market_spread("UPBIT", "BYBIT").alias("UPBIT_BYBIT_spread"),
+            market_spread("BINANCE", "BYBIT").alias("BINANCE_BYBIT_spread"),
+        )
+    )
 
-#     # 이상치 필터링
-#     outliers_df = stats_df.filter(F.col("price_volatility") > threshold)
 
-#     return outliers_df
+def detect_price_volume_signals(
+    df: DataFrame,
+    price_change_threshold: float = 2.0,
+    volume_surge_threshold: float = 2.8,
+    window_duration: str = "5 minutes",
+    sliding_duration: str = "1 minute",
+) -> DataFrame:
+    """실시간 가격 변동성과 거래량 급증 감지"""
+    def calc_change_percent(col: Column) -> Column:
+        """변화율 계산 함수"""
+        return F.round(
+            ((F.last(col) - F.first(col)) / F.first(col) * 100),
+            2
+        )
+    
+    return (
+        df.withWatermark("timestamp", "3 minutes")
+        .groupBy(
+            F.window("timestamp", window_duration, sliding_duration),
+            "coin_symbol",
+            "market",
+            "region",
+        )
+        .agg(
+            # 기본 통계
+            F.first("trade_price").alias("current_price"),
+            F.first("acc_trade_volume_24h").alias("current_volume"),
+            
+            # 가격 변화율 계산
+            calc_change_percent(F.col("trade_price")).alias("price_change_percent"),
+            
+            # 거래량 변화율 계산 - 수정된 부분
+            calc_change_percent(F.col("acc_trade_volume_24h")).alias("volume_change_percent"),
+
+            # 추가 지표
+            F.count("trade_price").alias("trade_count"),
+            F.round(F.stddev("trade_price"), 2).alias("price_volatility"),
+        )
+        .select(
+            "coin_symbol",
+            "market",
+            "region",
+            "window.start",
+            "window.end",
+            "current_price",
+            "current_volume",
+            "price_change_percent",
+            "volume_change_percent",
+            "trade_count",
+            "price_volatility",
+            # 가격 신호
+            F.when(
+                F.abs(F.col("price_change_percent")) >= F.lit(price_change_threshold),
+                F.concat(
+                    F.lit("PRICE_ALERT: "),
+                    F.when(F.col("price_change_percent") > 0, F.lit("▲")).otherwise(F.lit("▼")),
+                    F.col("price_change_percent").cast("string"),
+                    F.lit("%")
+                )
+            ).otherwise(F.lit(0)).alias("price_signal"),
+            
+            # 거래량 신호 
+            F.when(
+                F.col("volume_change_percent") >= F.lit(volume_surge_threshold),
+                F.concat(
+                    F.lit("VOLUME_SURGE: "),
+                    F.lit("▲"),
+                    F.col("volume_change_percent").cast("string"),
+                    F.lit("%")
+                )
+            ).otherwise(0).alias("volume_signal")
+        )
+    )

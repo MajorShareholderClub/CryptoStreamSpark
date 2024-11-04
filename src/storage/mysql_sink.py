@@ -2,7 +2,7 @@ from pyspark.sql import DataFrame
 from src.config.properties import COIN_MYSQL_URL, COIN_MYSQL_USER, COIN_MYSQL_PASSWORD
 
 
-def write_to_mysql(data: DataFrame, table_name: str):
+def write_to_mysql(data: DataFrame, table_name: str, stream_name: str):
     """
     Function Args:
         - data_format (DataFrame): 저장할 데이터 포맷
@@ -20,7 +20,10 @@ def write_to_mysql(data: DataFrame, table_name: str):
 
     - trigger(processingTime="1 minute")
     """
-    checkpoint_dir: str = f".checkpoint_{table_name}"
+    checkpoint_dir: str = (
+        f"checkpoint/{stream_name}/.mysql_checkpoint/.checkpoint_{table_name}"
+    )
+    minio_path: str = f"s3a://streaming-checkpoint/{checkpoint_dir}"
 
     def _write_batch_to_mysql(batch_df: DataFrame, batch_id) -> None:
         (
@@ -37,7 +40,7 @@ def write_to_mysql(data: DataFrame, table_name: str):
     return (
         data.writeStream.outputMode("update")
         .foreachBatch(_write_batch_to_mysql)
-        .option("checkpointLocation", f"checkpoint/mysql_checkpoint/{checkpoint_dir}")
+        .option("checkpointLocation", f"{checkpoint_dir}")
         .trigger(processingTime="1 minute")
         .start()
     )

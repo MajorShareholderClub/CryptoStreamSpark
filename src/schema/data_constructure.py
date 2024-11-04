@@ -28,20 +28,22 @@ from pyspark.sql.types import (
     TimestampType,
 )
 
-orderbook_data_schema = StructType(
-    [
-        StructField("region", StringType(), True),
-        StructField("market", StringType(), True),
-        StructField("symbol", StringType(), True),
-        StructField("highest_bid", FloatType(), True),
-        StructField("lowest_ask", FloatType(), True),
-        StructField("total_bid_volume", FloatType(), True),
-        StructField("total_ask_volume", FloatType(), True),
-        StructField("timestamp", TimestampType(), True),
-    ]
+orderbook_data_schema = ArrayType(
+    StructType(
+        [
+            StructField("region", StringType(), True),
+            StructField("market", StringType(), True),
+            StructField("symbol", StringType(), True),
+            StructField("highest_bid", FloatType(), True),
+            StructField("lowest_ask", FloatType(), True),
+            StructField("total_bid_volume", FloatType(), True),
+            StructField("total_ask_volume", FloatType(), True),
+            StructField("timestamp", TimestampType(), True),
+        ]
+    )
 )
 
-tickker_data_schema = StructType(
+ticker_data_schema = StructType(
     [
         StructField("opening_price", StringType(), True),
         StructField("trade_price", StringType(), True),
@@ -59,7 +61,7 @@ market_schema = StructType(
         StructField("market", StringType(), True),
         StructField("timestamp", DoubleType(), True),
         StructField("coin_symbol", StringType(), True),
-        StructField("data", tickker_data_schema),
+        StructField("data", ticker_data_schema),
     ]
 )
 
@@ -74,17 +76,19 @@ korea_schema = StructType(
 
 
 # 전체 마켓 데이터를 위한 스키마
-socket_market_schema = StructType(
-    [
-        StructField("region", StringType(), True),
-        StructField("market", StringType(), True),
-        StructField("coin_symbol", StringType(), True),
-        StructField("timestamp", DoubleType(), True),
-        StructField("data", ArrayType(tickker_data_schema), True),
-    ]
+socket_market_schema = ArrayType(
+    ArrayType(
+        StructType(
+            [
+                StructField("region", StringType(), True),
+                StructField("market", StringType(), True),
+                StructField("coin_symbol", StringType(), True),
+                StructField("timestamp", DoubleType(), True),
+                StructField("data", ArrayType(ticker_data_schema), True),
+            ]
+        )
+    )
 )
-
-
 """
 # 평균값
 {
@@ -104,7 +108,7 @@ average_schema = StructType(
         [
             StructField("name", StringType()),
             StructField("time", LongType()),
-            StructField("data", tickker_data_schema),
+            StructField("data", ticker_data_schema),
         ]
     ),
 )
