@@ -77,18 +77,17 @@ korea_schema = StructType(
 
 # 전체 마켓 데이터를 위한 스키마
 socket_market_schema = ArrayType(
-    ArrayType(
-        StructType(
-            [
-                StructField("region", StringType(), True),
-                StructField("market", StringType(), True),
-                StructField("coin_symbol", StringType(), True),
-                StructField("timestamp", DoubleType(), True),
-                StructField("data", ArrayType(ticker_data_schema), True),
-            ]
-        )
+    StructType(
+        [
+            StructField("region", StringType(), True),
+            StructField("market", StringType(), True),
+            StructField("coin_symbol", StringType(), True),
+            StructField("timestamp", DoubleType(), True),
+            StructField("data", ArrayType(ticker_data_schema), True),
+        ]
     )
 )
+
 """
 # 평균값
 {

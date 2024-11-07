@@ -39,17 +39,12 @@ def ticker_flatten_exchange_data(df: DataFrame) -> DataFrame:
     return flattened_df
 
 
-def calculate_time_based_metrics(
-    flattened_df: DataFrame,
-    window_duration: str = "1 minute",
-    sliding_duration: str = "30 seconds",
-) -> DataFrame:
+def calculate_time_based_metrics(df: DataFrame) -> DataFrame:
     """시간 기반 메트릭 계산 (통계 및 이동 평균)"""
     return (
-        flattened_df
-        .withWatermark("timestamp", "2 minutes")  # watermark 적용
+        df.withWatermark("timestamp", "5 minutes")
         .groupBy(
-            F.window("timestamp", window_duration, sliding_duration),
+            F.window("timestamp", "1 minute", "30 seconds"),
             F.col("coin_symbol"),
             F.col("region"),
         )
@@ -61,6 +56,10 @@ def calculate_time_based_metrics(
             F.round(F.stddev("trade_price"), 2).alias("price_volatility"),
             F.round(F.avg("trade_price"), 2).alias("MA_price"),
             F.round(F.avg("acc_trade_volume_24h"), 2).alias("MA_volume"),
+        )
+        .filter(
+            (F.col("window.start") > F.lit("2024-01-01").cast("timestamp")) &
+            (F.col("avg_price") > 0)
         )
         .select(
             "region",
@@ -74,7 +73,7 @@ def calculate_time_based_metrics(
             "price_volatility",
             "MA_price",
             "MA_volume",
-        )   
+        )
     )
 
 
@@ -105,12 +104,16 @@ def calculate_arbitrage(df: DataFrame) -> DataFrame:
         
 
     return (
-        df.withWatermark("timestamp", "3 minutes")  # watermark 적용
+        df.withWatermark("timestamp", "5 minutes")
         .groupBy(F.window("timestamp", "5 minutes", "1 minute"), "coin_symbol")
         .agg(
             avg_region_price("korea").alias("kr_price"),
             avg_region_price("asia").alias("asia_price"),
             avg_region_price("ne").alias("global_price"),
+        )
+        .filter(
+            (F.col("window.start") > F.lit("2024-01-01").cast("timestamp")) &
+            (F.col("kr_price").isNotNull() | F.col("asia_price").isNotNull() | F.col("global_price").isNotNull())
         )
         .select(
             "coin_symbol",
@@ -147,7 +150,7 @@ def calculate_market_arbitrage(df: DataFrame) -> DataFrame:
         )
 
     return (
-        df.withWatermark("timestamp", "3 minutes")
+        df.withWatermark("timestamp", "5 minutes")
         .groupBy(F.window("timestamp", "5 minutes", "1 minute"), "coin_symbol")
         .agg(
             # 한국 거래소
@@ -163,6 +166,7 @@ def calculate_market_arbitrage(df: DataFrame) -> DataFrame:
             avg_market_price("BINANCE").alias("BINANCE_price"),
             avg_market_price("KRAKEN").alias("KRAKEN_price"),
         )
+        .filter(F.col("window.start") > F.lit("2024-01-01").cast("timestamp"))
         .select(
             "coin_symbol",
             "window.start",
@@ -188,13 +192,7 @@ def calculate_market_arbitrage(df: DataFrame) -> DataFrame:
     )
 
 
-def detect_price_volume_signals(
-    df: DataFrame,
-    price_change_threshold: float = 2.0,
-    volume_surge_threshold: float = 2.8,
-    window_duration: str = "5 minutes",
-    sliding_duration: str = "1 minute",
-) -> DataFrame:
+def detect_price_volume_signals(df: DataFrame) -> DataFrame:
     """실시간 가격 변동성과 거래량 급증 감지"""
     def calc_change_percent(col: Column) -> Column:
         """변화율 계산 함수"""
@@ -204,9 +202,9 @@ def detect_price_volume_signals(
         )
     
     return (
-        df.withWatermark("timestamp", "3 minutes")
+        df.withWatermark("timestamp", "5 minutes")
         .groupBy(
-            F.window("timestamp", window_duration, sliding_duration),
+            F.window("timestamp", "5 minutes", "1 minute"),
             "coin_symbol",
             "market",
             "region",
@@ -226,6 +224,10 @@ def detect_price_volume_signals(
             F.count("trade_price").alias("trade_count"),
             F.round(F.stddev("trade_price"), 2).alias("price_volatility"),
         )
+        .filter(
+            (F.col("window.start") > F.lit("2024-01-01").cast("timestamp")) &
+            (F.col("current_price") > 0)
+        )
         .select(
             "coin_symbol",
             "market",
@@ -240,7 +242,7 @@ def detect_price_volume_signals(
             "price_volatility",
             # 가격 신호
             F.when(
-                F.abs(F.col("price_change_percent")) >= F.lit(price_change_threshold),
+                F.abs(F.col("price_change_percent")) >= F.lit(2.0),
                 F.concat(
                     F.lit("PRICE_ALERT: "),
                     F.when(F.col("price_change_percent") > 0, F.lit("▲")).otherwise(F.lit("▼")),
@@ -251,7 +253,7 @@ def detect_price_volume_signals(
             
             # 거래량 신호 
             F.when(
-                F.col("volume_change_percent") >= F.lit(volume_surge_threshold),
+                F.col("volume_change_percent") >= F.lit(2.8),
                 F.concat(
                     F.lit("VOLUME_SURGE: "),
                     F.lit("▲"),

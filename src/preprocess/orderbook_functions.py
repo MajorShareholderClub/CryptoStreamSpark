@@ -34,15 +34,24 @@ def orderbook_flatten_exchange_data(df: DataFrame) -> DataFrame:
 
 def calculate_region_stats(df: DataFrame) -> DataFrame:
     """각 region별 통계 계산 (1분 윈도우)"""
-
     return (
-        df.groupBy("region", F.window("timestamp", "1 minute"), "symbol")
+        df.withWatermark("timestamp", "5 minutes")
+        .groupBy("region", F.window("timestamp", "1 minute"), "symbol")
         .agg(
             bid_ask_avg("highest_bid").alias("avg_highest_bid"),
             bid_ask_avg("lowest_ask").alias("avg_lowest_ask"),
             bid_ask_avg("total_bid_volume").alias("total_bid_volume"),
             bid_ask_avg("total_ask_volume").alias("total_ask_volume"),
             F.count("*").alias("record_count"),
+        )
+        .filter(
+            (F.col("window.start") > F.lit("2024-01-01").cast("timestamp"))
+            & (
+                F.col("avg_highest_bid").isNotNull()
+                | F.col("avg_lowest_ask").isNotNull()
+                | F.col("total_bid_volume").isNotNull()
+                | F.col("total_ask_volume").isNotNull()
+            )
         )
         .select(
             "region",
@@ -62,13 +71,18 @@ def calculate_region_stats(df: DataFrame) -> DataFrame:
 def calculate_all_regions_stats(df: DataFrame) -> DataFrame:
     """모든 region의 통합 통계 계산 (1분 윈도우)"""
     return (
-        df.groupBy(F.window("timestamp", "1 minute"), "symbol")
+        df.withWatermark("timestamp", "5 minutes")
+        .groupBy(F.window("timestamp", "1 minute"), "symbol")
         .agg(
             bid_ask_avg("highest_bid").alias("avg_highest_bid"),
             bid_ask_avg("lowest_ask").alias("avg_lowest_ask"), 
             F.sum(F.when(F.col("total_bid_volume") > 0, F.col("total_bid_volume"))).alias("total_bid_volume"),
             F.sum(F.when(F.col("total_ask_volume") > 0, F.col("total_ask_volume"))).alias("total_ask_volume"),
             F.count("*").alias("record_count"),
+        )
+        .filter(
+            (F.col("window.start") > F.lit("2024-01-01").cast("timestamp")) &
+            (F.col("total_bid_volume").isNotNull() | F.col("total_ask_volume").isNotNull())
         )
         .select(
             F.lit("Total").alias("region"),

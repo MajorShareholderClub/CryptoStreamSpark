@@ -38,8 +38,7 @@ class TickerQueryOrganization(SparkCoinAverageQueryOrganization):
             self.kafka_cast_string.select(
                 F.from_json("value", schema=self.schema).alias("parsed_data")
             )
-            .select(F.explode("parsed_data").alias("outer_array"))
-            .select(F.explode("outer_array").alias("crypto"))
+            .select(F.explode("parsed_data").alias("crypto"))
             .select("crypto")
         )
 
